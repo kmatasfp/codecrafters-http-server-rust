@@ -1,4 +1,5 @@
 use crate::errors::{Error, Result};
+use crate::thread_pool::ThreadPool;
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
@@ -95,15 +96,18 @@ impl Server {
 
     pub fn listen(&self) -> Result<()> {
         let listener = TcpListener::bind(&self.addr)?;
+        let pool = ThreadPool::new(8);
 
         for stream in listener.incoming() {
-            match stream.map_err(|e| e.into()).and_then(|mut stream| {
-                HttpRequest::try_from(&stream)
-                    .and_then(|req| Self::handle_request(&req, &mut stream))
-            }) {
-                Ok(_) => (),
-                Err(e) => eprintln!("Failed to handle request, error {}", e),
-            }
+            pool.execute(|| {
+                match stream.map_err(|e| e.into()).and_then(|mut stream| {
+                    HttpRequest::try_from(&stream)
+                        .and_then(|req| Self::handle_request(&req, &mut stream))
+                }) {
+                    Ok(_) => (),
+                    Err(e) => eprintln!("Failed to handle request, error {}", e),
+                }
+            });
         }
 
         Ok(())

@@ -3,6 +3,7 @@ use server::Server;
 
 mod errors;
 mod server;
+mod thread_pool;
 
 fn main() -> Result<()> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
