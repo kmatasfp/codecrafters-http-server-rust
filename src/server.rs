@@ -46,6 +46,16 @@ impl Server {
     fn handle_request(req: &HttpRequest, stream: &mut TcpStream) -> Result<()> {
         let result = if req.target == "/" {
             String::from("HTTP/1.1 200 OK\r\n\r\n")
+        } else if req.target.starts_with("/echo") {
+            if let Some(echo_str) = req.target.split('/').last() {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    echo_str.len(),
+                    echo_str
+                )
+            } else {
+                String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+            }
         } else {
             String::from("HTTP/1.1 404 Not Found\r\n\r\n")
         };
