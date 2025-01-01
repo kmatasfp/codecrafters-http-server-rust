@@ -1,5 +1,6 @@
 use crate::errors::{Error, Result};
 use std::{
+    collections::HashMap,
     io::{BufRead, BufReader, Write},
     net::{TcpListener, TcpStream},
 };
@@ -7,6 +8,7 @@ use std::{
 #[derive(Debug)]
 pub struct HttpRequest {
     target: String,
+    headers: HashMap<String, String>,
 }
 
 impl TryFrom<&TcpStream> for HttpRequest {
@@ -17,20 +19,38 @@ impl TryFrom<&TcpStream> for HttpRequest {
 
         let mut lines = buf_reader.lines();
 
-        if let Some(line) = lines.next() {
+        let maybe_request_line = if let Some(line) = lines.next() {
             let request_line = line?;
 
             let request_line_split: Vec<&str> = request_line.split_whitespace().collect();
 
-            let target = request_line_split
+            request_line_split
                 .get(1)
                 .ok_or(Error::InvalidRequest)
-                .map(|t| (*t).to_owned())?;
-
-            Ok(HttpRequest { target })
+                .map(|t| (*t).to_owned())
         } else {
             Err(Error::InvalidRequest)
+        };
+
+        let mut headers: HashMap<String, String> = HashMap::new();
+        for line in lines {
+            let header_line = line?;
+
+            if header_line.trim().is_empty() {
+                break;
+            }
+
+            if let Some((key, value)) = header_line.split_once(':') {
+                headers.insert(
+                    key.trim().to_lowercase().to_owned(),
+                    value.trim().to_owned(),
+                );
+            } else {
+                return Err(Error::InvalidRequest);
+            }
         }
+
+        maybe_request_line.map(|target| HttpRequest { target, headers })
     }
 }
 
@@ -56,6 +76,16 @@ impl Server {
             } else {
                 String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
             }
+        } else if req.target.starts_with("/user-agent") {
+            if let Some(user_agent_header) = req.headers.get("user-agent") {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                    user_agent_header.len(),
+                    user_agent_header
+                )
+            } else {
+                String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+            }
         } else {
             String::from("HTTP/1.1 404 Not Found\r\n\r\n")
         };
@@ -67,10 +97,13 @@ impl Server {
         let listener = TcpListener::bind(&self.addr)?;
 
         for stream in listener.incoming() {
-            stream.map_err(|e| e.into()).and_then(|mut stream| {
+            match stream.map_err(|e| e.into()).and_then(|mut stream| {
                 HttpRequest::try_from(&stream)
                     .and_then(|req| Self::handle_request(&req, &mut stream))
-            })?
+            }) {
+                Ok(_) => (),
+                Err(e) => eprintln!("Failed to handle request, error {}", e),
+            }
         }
 
         Ok(())
