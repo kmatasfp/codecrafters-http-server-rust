@@ -10,3 +10,4 @@ anyhow = "1.0.68"                                        # error handling
 bytes = "1.3.0"                                          # helps manage buffers
 thiserror = "1.0.38"                                     # error handling
 derive_more = { version = "1.0.0", features = ["from"] }
+flate2 = "1.0.35"

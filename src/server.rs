@@ -1,6 +1,9 @@
 use crate::errors::{Error, Result};
 use crate::thread_pool::ThreadPool;
 use crate::Args;
+use bytes::{BufMut, Bytes, BytesMut};
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use std::fs;
 use std::io::Read;
 use std::str::FromStr;
@@ -132,6 +135,12 @@ impl Server {
         Server { addr, conf }
     }
 
+    fn compress_gzip(content: &str) -> Result<Vec<u8>> {
+        let mut e = GzEncoder::new(Vec::new(), Compression::default());
+        e.write_all(content.as_bytes())?;
+        e.finish().map_err(|e| e.into())
+    }
+
     fn handle_request(req: &HttpRequest, stream: &mut TcpStream, conf: &Args) -> Result<()> {
         let response = match req {
             HttpRequest {
@@ -139,7 +148,7 @@ impl Server {
                 method: HttpMethod::GET,
                 headers: _,
                 body: _,
-            } if target == "/" => String::from("HTTP/1.1 200 OK\r\n\r\n"),
+            } if target == "/" => Bytes::from("HTTP/1.1 200 OK\r\n\r\n"),
             HttpRequest {
                 target,
                 method: HttpMethod::POST,
@@ -152,18 +161,18 @@ impl Server {
 
                         if let Some(contents) = body {
                             if let Ok(()) = fs::write(file_path, contents) {
-                                String::from("HTTP/1.1 201 Created\r\n\r\n")
+                                Bytes::from("HTTP/1.1 201 Created\r\n\r\n")
                             } else {
-                                String::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                                Bytes::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
                             }
                         } else {
-                            String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                            Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                         }
                     } else {
-                        String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                        Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                     }
                 } else {
-                    String::from("HTTP/1.1 503 Service Unavailable\r\n\r\n")
+                    Bytes::from("HTTP/1.1 503 Service Unavailable\r\n\r\n")
                 }
             }
             HttpRequest {
@@ -179,36 +188,45 @@ impl Server {
                             if let Ok(contents) = fs::read_to_string(file_path) {
                                 if let Some(encoding) = headers.get("accept-encoding") {
                                     if encoding.contains("gzip") {
-                                        format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
-                                            contents.len(),
-                                            contents
-                                        )
+                                        if let Ok(body) = Self::compress_gzip(&contents) {
+                                            let mut response_buf = BytesMut::with_capacity(4096);
+
+                                            response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes());
+                                            response_buf.put(&body[..]);
+
+                                            response_buf.freeze()
+                                        } else {
+                                            Bytes::from(
+                                                "HTTP/1.1 500 Internal Server Error\r\n\r\n",
+                                            )
+                                        }
                                     } else {
-                                        format!(
-                                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                                            contents.len(),
-                                            contents
-                                        )
+                                        let mut response_buf = BytesMut::with_capacity(1024);
+
+                                        response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n", contents.len()).as_bytes());
+                                        response_buf.put(contents.as_bytes());
+
+                                        response_buf.freeze()
                                     }
                                 } else {
-                                    format!(
-                                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                                        contents.len(),
-                                        contents
-                                    )
+                                    let mut response_buf = BytesMut::with_capacity(1024);
+
+                                    response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n", contents.len()).as_bytes());
+                                    response_buf.put(contents.as_bytes());
+
+                                    response_buf.freeze()
                                 }
                             } else {
-                                String::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                                Bytes::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
                             }
                         } else {
-                            String::from("HTTP/1.1 404 Not Found\r\n\r\n")
+                            Bytes::from("HTTP/1.1 404 Not Found\r\n\r\n")
                         }
                     } else {
-                        String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                        Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                     }
                 } else {
-                    String::from("HTTP/1.1 503 Service Unavailable\r\n\r\n")
+                    Bytes::from("HTTP/1.1 503 Service Unavailable\r\n\r\n")
                 }
             }
             HttpRequest {
@@ -220,27 +238,34 @@ impl Server {
                 if let Some(echo_str) = target.split('/').last() {
                     if let Some(encoding) = headers.get("accept-encoding") {
                         if encoding.contains("gzip") {
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/text-plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
-                                echo_str.len(),
-                                echo_str
-                            )
+                            if let Ok(body) = Self::compress_gzip(echo_str) {
+                                let mut response_buf = BytesMut::with_capacity(4096);
+
+                                response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes());
+                                response_buf.put(&body[..]);
+
+                                response_buf.freeze()
+                            } else {
+                                Bytes::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                            }
                         } else {
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                                echo_str.len(),
-                                echo_str
-                            )
+                            let mut response_buf = BytesMut::with_capacity(1024);
+
+                            response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n", echo_str.len()).as_bytes());
+                            response_buf.put(echo_str.as_bytes());
+
+                            response_buf.freeze()
                         }
                     } else {
-                        format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                            echo_str.len(),
-                            echo_str
-                        )
+                        let mut response_buf = BytesMut::with_capacity(1024);
+
+                        response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n", echo_str.len()).as_bytes());
+                        response_buf.put(echo_str.as_bytes());
+
+                        response_buf.freeze()
                     }
                 } else {
-                    String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                    Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                 }
             }
             HttpRequest {
@@ -252,33 +277,40 @@ impl Server {
                 if let Some(user_agent_header) = headers.get("user-agent") {
                     if let Some(encoding) = headers.get("accept-encoding") {
                         if encoding.contains("gzip") {
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
-                                user_agent_header.len(),
-                                user_agent_header
-                            )
+                            if let Ok(body) = Self::compress_gzip(user_agent_header) {
+                                let mut response_buf = BytesMut::with_capacity(4096);
+
+                                response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n", body.len()).as_bytes());
+                                response_buf.put(&body[..]);
+
+                                response_buf.freeze()
+                            } else {
+                                Bytes::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                            }
                         } else {
-                            format!(
-                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                                user_agent_header.len(),
-                                user_agent_header
-                            )
+                            let mut response_buf = BytesMut::with_capacity(1024);
+
+                            response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n", user_agent_header.len()).as_bytes());
+                            response_buf.put(user_agent_header.as_bytes());
+
+                            response_buf.freeze()
                         }
                     } else {
-                        format!(
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                            user_agent_header.len(),
-                            user_agent_header
-                        )
+                        let mut response_buf = BytesMut::with_capacity(1024);
+
+                        response_buf.put(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n", user_agent_header.len()).as_bytes());
+                        response_buf.put(user_agent_header.as_bytes());
+
+                        response_buf.freeze()
                     }
                 } else {
-                    String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                    Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                 }
             }
-            _ => String::from("HTTP/1.1 404 Not Found\r\n\r\n"),
+            _ => Bytes::from("HTTP/1.1 404 Not Found\r\n\r\n"),
         };
 
-        stream.write_all(response.as_bytes()).map_err(Error::Io)
+        stream.write_all(&response[..]).map_err(Error::Io)
     }
 
     pub fn listen(&self) -> Result<()> {
