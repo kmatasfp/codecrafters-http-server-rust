@@ -181,13 +181,12 @@ impl Server {
                 headers,
                 body: _,
             } if target.starts_with("/file") => {
-                println!("handling file read");
                 if let Some(parent_dir) = &conf.directory {
                     if let Some(file_name) = target.split('/').last() {
                         let file_path = parent_dir.join(file_name);
                         if let Ok(full_file_path) = file_path.canonicalize() {
                             if full_file_path.starts_with(parent_dir) {
-                                if file_path.exists() {
+                                if full_file_path.exists() {
                                     if let Ok(contents) = fs::read_to_string(file_path) {
                                         println!("sending file content {}", contents);
                                         if let Some(encoding) = headers.get("accept-encoding") {
@@ -232,7 +231,7 @@ impl Server {
                                 Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                             }
                         } else {
-                            Bytes::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                            Bytes::from("HTTP/1.1 404 Not Found\r\n\r\n")
                         }
                     } else {
                         Bytes::from("HTTP/1.1 400 Bad Request\r\n\r\n")
