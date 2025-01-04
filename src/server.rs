@@ -178,7 +178,7 @@ impl Server {
                         if file_path.exists() {
                             if let Ok(contents) = fs::read_to_string(file_path) {
                                 if let Some(encoding) = headers.get("accept-encoding") {
-                                    if encoding == "gzip" {
+                                    if encoding.contains("gzip") {
                                         format!(
                                             "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
                                             contents.len(),
@@ -219,7 +219,7 @@ impl Server {
             } if target.starts_with("/echo") => {
                 if let Some(echo_str) = target.split('/').last() {
                     if let Some(encoding) = headers.get("accept-encoding") {
-                        if encoding == "gzip" {
+                        if encoding.contains("gzip") {
                             format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: application/text-plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
                                 echo_str.len(),
@@ -251,7 +251,7 @@ impl Server {
             } if target.starts_with("/user-agent") => {
                 if let Some(user_agent_header) = headers.get("user-agent") {
                     if let Some(encoding) = headers.get("accept-encoding") {
-                        if encoding == "gzip" {
+                        if encoding.contains("gzip") {
                             format!(
                                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
                                 user_agent_header.len(),
