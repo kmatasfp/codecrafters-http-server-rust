@@ -147,7 +147,7 @@ impl Server {
                 body,
             } if target.starts_with("/file") => {
                 if let Some(parent_dir) = &conf.directory {
-                    if let Some(file_name) = req.target.split('/').last() {
+                    if let Some(file_name) = target.split('/').last() {
                         let file_path = parent_dir.join(file_name);
 
                         if let Some(contents) = body {
@@ -169,19 +169,35 @@ impl Server {
             HttpRequest {
                 target,
                 method: HttpMethod::GET,
-                headers: _,
+                headers,
                 body: _,
             } if target.starts_with("/file") => {
                 if let Some(parent_dir) = &conf.directory {
-                    if let Some(file_name) = req.target.split('/').last() {
+                    if let Some(file_name) = target.split('/').last() {
                         let file_path = parent_dir.join(file_name);
                         if file_path.exists() {
                             if let Ok(contents) = fs::read_to_string(file_path) {
-                                format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
-                                    contents.len(),
-                                    contents
-                                )
+                                if let Some(encoding) = headers.get("accept-encoding") {
+                                    if encoding == "gzip" {
+                                        format!(
+                                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                                            contents.len(),
+                                            contents
+                                        )
+                                    } else {
+                                        format!(
+                                            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                                            contents.len(),
+                                            contents
+                                        )
+                                    }
+                                } else {
+                                    format!(
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                                        contents.len(),
+                                        contents
+                                    )
+                                }
                             } else {
                                 String::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
                             }
@@ -198,15 +214,31 @@ impl Server {
             HttpRequest {
                 target,
                 method: HttpMethod::GET,
-                headers: _,
+                headers,
                 body: _,
             } if target.starts_with("/echo") => {
-                if let Some(echo_str) = req.target.split('/').last() {
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                        echo_str.len(),
-                        echo_str
-                    )
+                if let Some(echo_str) = target.split('/').last() {
+                    if let Some(encoding) = headers.get("accept-encoding") {
+                        if encoding == "gzip" {
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/text-plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                                echo_str.len(),
+                                echo_str
+                            )
+                        } else {
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                echo_str.len(),
+                                echo_str
+                            )
+                        }
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                            echo_str.len(),
+                            echo_str
+                        )
+                    }
                 } else {
                     String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                 }
@@ -214,15 +246,31 @@ impl Server {
             HttpRequest {
                 target,
                 method: HttpMethod::GET,
-                headers: _,
+                headers,
                 body: _,
             } if target.starts_with("/user-agent") => {
-                if let Some(user_agent_header) = req.headers.get("user-agent") {
-                    format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-                        user_agent_header.len(),
-                        user_agent_header
-                    )
+                if let Some(user_agent_header) = headers.get("user-agent") {
+                    if let Some(encoding) = headers.get("accept-encoding") {
+                        if encoding == "gzip" {
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Encoding: gzip\r\nContent-Length: {}\r\n\r\n{}",
+                                user_agent_header.len(),
+                                user_agent_header
+                            )
+                        } else {
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                                user_agent_header.len(),
+                                user_agent_header
+                            )
+                        }
+                    } else {
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+                            user_agent_header.len(),
+                            user_agent_header
+                        )
+                    }
                 } else {
                     String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
                 }
