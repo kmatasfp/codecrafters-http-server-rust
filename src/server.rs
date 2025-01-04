@@ -1,5 +1,8 @@
 use crate::errors::{Error, Result};
 use crate::thread_pool::ThreadPool;
+use crate::Args;
+use std::fs;
+use std::sync::Arc;
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
@@ -57,16 +60,40 @@ impl TryFrom<&TcpStream> for HttpRequest {
 
 pub struct Server {
     addr: String,
+    conf: Args,
 }
 
 impl Server {
-    pub fn new(addr: String) -> Self {
-        Server { addr }
+    pub fn new(addr: String, conf: Args) -> Self {
+        Server { addr, conf }
     }
 
-    fn handle_request(req: &HttpRequest, stream: &mut TcpStream) -> Result<()> {
+    fn handle_request(req: &HttpRequest, stream: &mut TcpStream, conf: &Args) -> Result<()> {
         let result = if req.target == "/" {
             String::from("HTTP/1.1 200 OK\r\n\r\n")
+        } else if req.target.starts_with("/file") {
+            if let Some(parent_dir) = &conf.directory {
+                if let Some(file_name) = req.target.split('/').last() {
+                    let file_path = parent_dir.join(file_name);
+                    if file_path.exists() {
+                        if let Ok(contents) = fs::read_to_string(file_path) {
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n{}",
+                                contents.len(),
+                                contents
+                            )
+                        } else {
+                            String::from("HTTP/1.1 500 Internal Server Error\r\n\r\n")
+                        }
+                    } else {
+                        String::from("HTTP/1.1 404 Not Found\r\n\r\n")
+                    }
+                } else {
+                    String::from("HTTP/1.1 400 Bad Request\r\n\r\n")
+                }
+            } else {
+                String::from("HTTP/1.1 503 Service Unavailable\r\n\r\n")
+            }
         } else if req.target.starts_with("/echo") {
             if let Some(echo_str) = req.target.split('/').last() {
                 format!(
@@ -98,11 +125,14 @@ impl Server {
         let listener = TcpListener::bind(&self.addr)?;
         let pool = ThreadPool::new(8);
 
+        let conf = Arc::new(self.conf.clone());
+
         for stream in listener.incoming() {
-            pool.execute(|| {
+            let conf = Arc::clone(&conf);
+            pool.execute(move || {
                 match stream.map_err(|e| e.into()).and_then(|mut stream| {
                     HttpRequest::try_from(&stream)
-                        .and_then(|req| Self::handle_request(&req, &mut stream))
+                        .and_then(|req| Self::handle_request(&req, &mut stream, &conf))
                 }) {
                     Ok(_) => (),
                     Err(e) => eprintln!("Failed to handle request, error {}", e),
